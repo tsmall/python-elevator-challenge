@@ -1,4 +1,3 @@
-import operator
 import impl
 
 UP = 1
@@ -9,7 +8,7 @@ class ElevatorLogic(object):
 
     def __init__(self):
         self.callbacks = None
-        self.data = impl.make_elevator_struct(FLOOR_COUNT)
+        self.data = impl.initial_elevator_state(FLOOR_COUNT)
 
     def on_called(self, floor, direction):
         """

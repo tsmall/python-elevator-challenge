@@ -1,3 +1,5 @@
+import calls
+
 UP = 1
 DOWN = 2
 
@@ -5,111 +7,97 @@ DOWN = 2
 # Model ------------------------------------------------------------------------
 
 
-def make_elevator_struct(floor_count):
+def initial_elevator_state(num_floors):
     return {
         'current_direction': None,
         'requested_direction': None,
-        'selected': _make_floor_list(floor_count),
-        'calls': {
-            UP: _make_floor_list(floor_count),
-            DOWN: _make_floor_list(floor_count),
-            None: _make_floor_list(floor_count),
-        },
+        'selected': [False] * (num_floors + 1),
+        'calls': calls.initial_state(num_floors),
     }
-
-
-def _make_floor_list(floor_count):
-    return [False] * (floor_count + 1)
 
 
 # Actions ----------------------------------------------------------------------
 
 
-def on_called(struct, floor, direction):
-    struct['calls'][direction][floor] = True
+def on_called(state, floor, direction):
+    calls.call_requested(state['calls'], floor, direction)
 
 
-def on_floor_selected(struct, selected_floor, current_floor):
+def on_floor_selected(state, selected_floor, current_floor):
     if selected_floor == current_floor:
         return
 
-    current_direction = _get_current_direction(struct, current_floor)
+    current_direction = _get_current_direction(state, current_floor)
     requested_direction = UP if selected_floor > current_floor else DOWN
     if current_direction in (requested_direction, None):
-        struct['selected'][selected_floor] = True
-        struct['current_direction'] = requested_direction
+        state['selected'][selected_floor] = True
+        state['current_direction'] = requested_direction
+        state['requested_direction'] = None
 
 
-def on_floor_changed(struct, current_floor):
-    current_direction = _get_current_direction(struct, current_floor)
-    opposite_direction = _get_opposite_direction(current_direction)
+def on_floor_changed(state, current_floor):
+    assert current_floor < len(state['selected']), "Floor too large: {}".format(current_floor)
+    assert current_floor > 0, "Floor below one: {}".format(current_floor)
 
-    if any(struct['calls'][current_direction]) or any(struct['selected']):
-        if struct['calls'][current_direction][current_floor]:
-            struct['requested_direction'] = current_direction
-            struct['current_direction'] = None
-            struct['calls'][current_direction][current_floor] = False
+    current_direction = _get_current_direction(state, current_floor)
+    call = calls.available(state['calls'], current_floor, current_direction)
 
-        if struct['selected'][current_floor]:
-            struct['current_direction'] = None
-            struct['selected'][current_floor] = False
+    if any(state['selected']):
+        if state['selected'][current_floor]:
+            state['current_direction'] = None
+            state['selected'][current_floor] = False
 
-    elif struct['calls'][opposite_direction][current_floor]:
-        struct['current_direction'] = None
-        struct['requested_direction'] = opposite_direction
-        struct['calls'][opposite_direction][current_floor] = False
+        if call and call.floor == current_floor and call.direction == current_direction:
+            state['current_direction'] = None
+            state['requested_direction'] = call.direction
+            calls.call_serviced(state['calls'], call)
 
-
-def on_ready(struct, current_floor):
-    current_direction = _get_current_direction(struct, current_floor)
-    opposite_direction = _get_opposite_direction(current_direction)
-
-    if any(struct['calls'][current_direction]) or any(struct['selected']):
-        struct['current_direction'] = current_direction
-        struct['requested_direction'] = None
-
-    elif opposite_direction is not None and any(struct['calls'][opposite_direction]):
-        floor = _get_next_floor(struct['calls'][opposite_direction])
-        if floor == current_floor:
-            struct['requested_direction'] = opposite_direction
-            struct['calls'][DOWN][floor] = False
-        else:
-            struct['current_direction'] = UP if floor > current_floor else DOWN
-            struct['requested_direction'] = None
-
-    else:
-        struct['requested_direction'] = None
-        if any(struct['calls'][UP]):
-            floor = _get_next_floor(struct['calls'][UP])
-            struct['current_direction'] = UP if floor > current_floor else DOWN
-            if floor == current_floor:
-                struct['calls'][UP][floor] = False
-        elif any(struct['calls'][DOWN]):
-            floor = _get_next_floor(struct['calls'][DOWN])
-            struct['current_direction'] = UP if floor > current_floor else DOWN
-            if floor == current_floor:
-                struct['calls'][DOWN][floor] = False
+    elif call and call.floor == current_floor:
+        state['current_direction'] = None
+        state['requested_direction'] = call.direction
+        calls.call_serviced(state['calls'], call)
 
 
-# Helpers ----------------------------------------------------------------------
+def on_ready(state, current_floor):
+    current_direction = _get_current_direction(state, current_floor)
+    call = calls.available(state['calls'], current_floor, current_direction)
+    state['requested_direction'] = None
+
+    if call and call.floor == current_floor and call.direction == current_direction:
+        state['current_direction'] = None
+        state['requested_direction'] = current_direction
+        calls.call_serviced(state['calls'], call)
+
+    elif any(state['selected']):
+        state['current_direction'] = current_direction
+        state['requested_direction'] = None
+
+    elif call:
+        if call.floor == current_floor:
+            state['current_direction'] = None
+            state['requested_direction'] = call.direction
+            calls.call_serviced(state['calls'], call)
+
+        elif call:
+            state['current_direction'] = UP if call.floor > current_floor else DOWN
+            state['requested_direction'] = None
 
 
-def _get_current_direction(struct, current_floor):
+# Utils ------------------------------------------------------------------------
+
+
+def _get_current_direction(state, current_floor):
+    return state['current_direction'] \
+        or state['requested_direction'] \
+        or _get_floor_direction(state, current_floor)
+
+
+def _get_floor_direction(state, current_floor):
     floor_direction = None
-    if any(struct['selected']):
-        floor = _get_next_floor(struct['selected'])
+    if any(state['selected']):
+        floor = _get_next_floor(state['selected'])
         floor_direction = UP if floor > current_floor else DOWN
-
-    return struct['current_direction'] or struct['requested_direction'] or floor_direction
-
-
-def _get_opposite_direction(direction):
-    opposites = {
-        UP: DOWN,
-        DOWN: UP,
-        None: None,
-    }
-    return opposites[direction]
+    return floor_direction
 
 
 def _get_next_floor(bool_list):
