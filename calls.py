@@ -1,9 +1,11 @@
 from collections import namedtuple
 import operator
 
-UP = 1
-DOWN = 2
+import direction
 
+
+UP = direction.UP
+DOWN = direction.DOWN
 
 Call = namedtuple('Call', ('floor', 'direction'))
 
@@ -43,7 +45,7 @@ def _on_floor_going_right_way(state, current_floor, current_direction):
 
 
 def _on_floor_going_other_way(state, current_floor, current_direction):
-    opposite_direction = UP if current_direction == DOWN else DOWN
+    opposite_direction = direction.opposite(current_direction)
     if state[opposite_direction][current_floor]:
         return Call(current_floor, opposite_direction)
     return None

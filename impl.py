@@ -1,7 +1,5 @@
 import calls
-
-UP = 1
-DOWN = 2
+from direction import UP, DOWN
 
 
 # Model ------------------------------------------------------------------------
