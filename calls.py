@@ -69,15 +69,26 @@ def _best_going_other_way(state, current_floor, current_direction):
 
 
 def _nearest(state, current_floor):
-    calls = _call_list(state, UP) + _call_list(state, DOWN)
-    calls_with_distance = [(abs(call.floor - current_floor), call) for call in calls]
-    nearest = first(sorted(calls_with_distance), (None, None))
-    return nearest[1]
+    calls_with_time = _call_list_with_times(state, UP) + _call_list_with_times(state, DOWN)
+    calls_with_distance_and_time = [
+        (abs(call.floor - current_floor), time_called, call)
+        for time_called, call in calls_with_time
+    ]
+
+    distance, time_called, call = first(
+        sorted(calls_with_distance_and_time),
+        (None, None, None),
+    )
+    return call
 
 
 def _call_list(state, direction):
+    return [call for time_called, call in _call_list_with_times(state, direction)]
+
+
+def _call_list_with_times(state, direction):
     return [
-        Call(floor, direction)
+        (time_called, Call(floor, direction))
         for floor, time_called in enumerate(state[direction])
         if time_called
     ]
