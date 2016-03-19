@@ -1,7 +1,5 @@
 import impl
 
-UP = 1
-DOWN = 2
 FLOOR_COUNT = 6
 
 class ElevatorLogic(object):
