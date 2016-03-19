@@ -1,5 +1,6 @@
 from collections import namedtuple
 import operator
+import time
 
 import direction
 
@@ -11,6 +12,10 @@ Call = namedtuple('Call', ('floor', 'direction'))
 
 
 def initial_state(num_floors):
+    # The requests are stored as a list. The list's size is one larger than the
+    # number of floors, so the list's indexes match the floor numbers. The
+    # values can either be False, indicating the floor doesn't have a request,
+    # or a timestamp of the time the request was made.
     make_list = lambda: [False] * (num_floors + 1)
     return {
         UP: make_list(),
@@ -45,7 +50,7 @@ def _on_floor_going_right_way(state, current_floor, current_direction):
 
 
 def _next_going_right_way(state, current_floor, current_direction):
-    calls = [Call(floor, current_direction) for floor, called in enumerate(state[current_direction]) if called]
+    calls = _call_list(state, current_direction)
     comparator = operator.ge if current_direction == UP else operator.le
     possible = [call for call in calls if comparator(call.floor, current_floor)]
     return first(possible, None)
@@ -58,19 +63,24 @@ def _best_going_other_way(state, current_floor, current_direction):
     opposite_direction = direction.opposite(current_direction)
     if any(state[opposite_direction]):
         f = max if opposite_direction == DOWN else min
-        floor = f(floor for floor, called in enumerate(state[opposite_direction]) if called)
-        return Call(floor, opposite_direction)
+        return f(_call_list(state, opposite_direction))
 
     return None
 
 
 def _nearest(state, current_floor):
-    up_calls = [Call(floor, UP) for floor, called in enumerate(state[UP]) if called]
-    down_calls = [Call(floor, DOWN) for floor, called in enumerate(state[DOWN]) if called]
-    calls = up_calls + down_calls
+    calls = _call_list(state, UP) + _call_list(state, DOWN)
     calls_with_distance = [(abs(call.floor - current_floor), call) for call in calls]
     nearest = first(sorted(calls_with_distance), (None, None))
     return nearest[1]
+
+
+def _call_list(state, direction):
+    return [
+        Call(floor, direction)
+        for floor, time_called in enumerate(state[direction])
+        if time_called
+    ]
 
 
 def call_serviced(state, (floor, direction)):
@@ -94,7 +104,7 @@ def call_requested(
     if is_stopped and on_floor and going_that_way:
         return
 
-    state[requested_direction][requested_floor] = True
+    state[requested_direction][requested_floor] = time.time()
 
 
 def first(iterable, default):
