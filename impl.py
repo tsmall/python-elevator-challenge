@@ -7,6 +7,7 @@ from direction import UP, DOWN
 
 def initial_elevator_state(num_floors):
     return {
+        'current_floor': 1,
         'current_direction': None,
         'requested_direction': None,
         'selected': [False] * (num_floors + 1),
@@ -17,8 +18,16 @@ def initial_elevator_state(num_floors):
 # Actions ----------------------------------------------------------------------
 
 
-def on_called(state, floor, direction):
-    calls.call_requested(state['calls'], floor, direction)
+def on_called(state, requested_floor, requested_direction):
+    current_floor = state['current_floor']
+    current_direction = _get_current_direction(state, current_floor)
+    is_stopped = state['current_direction'] is None
+    calls.call_requested(
+        state['calls'],
+        current_floor, requested_floor,
+        is_stopped,
+        current_direction, requested_direction,
+    )
 
 
 def on_floor_selected(state, selected_floor, current_floor):
@@ -37,6 +46,7 @@ def on_floor_changed(state, current_floor):
     assert current_floor < len(state['selected']), "Floor too large: {}".format(current_floor)
     assert current_floor > 0, "Floor below one: {}".format(current_floor)
 
+    state['current_floor'] = current_floor
     current_direction = _get_current_direction(state, current_floor)
     call = calls.available(state['calls'], current_floor, current_direction)
 

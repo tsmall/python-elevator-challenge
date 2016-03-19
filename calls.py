@@ -84,8 +84,17 @@ def call_serviced(state, (floor, direction)):
     state[direction][floor] = False
 
 
-def call_requested(state, floor, direction):
-    state[direction][floor] = True
+def call_requested(
+        state,
+        current_floor, requested_floor,
+        is_stopped, current_direction, requested_direction
+):
+    on_floor = (current_floor == requested_floor)
+    going_that_way = (current_direction == requested_direction)
+    if is_stopped and on_floor and going_that_way:
+        return
+
+    state[requested_direction][requested_floor] = True
 
 
 def first(iterable, default):
