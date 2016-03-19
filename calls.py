@@ -52,6 +52,9 @@ def _next_going_right_way(state, current_floor, current_direction):
 
 
 def _best_going_other_way(state, current_floor, current_direction):
+    if current_direction == None:
+        return None
+
     opposite_direction = direction.opposite(current_direction)
     if any(state[opposite_direction]):
         f = max if opposite_direction == DOWN else min

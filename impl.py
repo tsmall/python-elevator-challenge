@@ -55,6 +55,13 @@ def on_floor_changed(state, current_floor):
         state['requested_direction'] = call.direction
         calls.call_serviced(state['calls'], call)
 
+    current_direction = _get_current_direction(state, current_floor)
+    if current_direction is None:
+        call = calls.available(state['calls'], current_floor, current_direction)
+        if call and call.floor == current_floor:
+            state['requested_direction'] = call.direction
+            calls.call_serviced(state['calls'], call)
+
 
 def on_ready(state, current_floor):
     current_direction = _get_current_direction(state, current_floor)
