@@ -19,7 +19,7 @@ class ElevatorLogic(object):
         floor: the floor that the elevator is being called to
         direction: the direction the caller wants to go, up or down
         """
-        impl.on_called(self.data, floor, direction)
+        impl.on_called(self.data, floor, direction, self.callbacks.current_floor)
 
     def on_floor_selected(self, floor):
         """
