@@ -67,30 +67,52 @@ class ElevatorLogic(object):
 
 
 def main(inputs):
-    # A stream loop for the outstanding calls.
+    # Stream loops for the outstanding calls and selections.
     s_calls = Subject()
+    s_selections = Subject()
 
     current_floor = BehaviorSubject(1)
     inputs['floor_changed'].subscribe(current_floor)
 
     s_serviced_calls = _create_serviced_calls(current_floor, s_calls) \
         .publish().ref_count()
+    _create_calls(inputs['called'], s_serviced_calls) \
+        .subscribe(s_calls)
 
-    _create_calls(inputs['called'], s_serviced_calls).subscribe(s_calls)
+    s_serviced_selections = _create_serviced_selections(current_floor, s_selections) \
+        .publish().ref_count()
+    _create_selections(inputs['floor_selected'], s_serviced_selections) \
+        .subscribe(s_selections)
 
-    s_direction_changes = _create_direction_changes(
+    s_call_direction_changes = _create_call_direction_changes(
         inputs['ready'],
-        s_serviced_calls,
-        s_calls,
+        s_serviced_calls, s_calls,
+        current_floor
+    )
+    s_selection_direction_changes = _create_selection_direction_changes(
+        inputs['ready'],
+        s_serviced_selections, s_selections,
         current_floor
     )
 
-    return s_direction_changes.publish().ref_count()
+    return Observable.merge(
+        s_call_direction_changes,
+        s_selection_direction_changes,
+    )
+
+
+# Stream creation --------------------------------------------------------------
 
 
 def _create_serviced_calls(current_floor, s_calls):
     return current_floor \
         .with_latest_from(s_calls, find_call_on_floor) \
+        .filter(bool)
+
+
+def _create_serviced_selections(current_floor, s_selections):
+    return current_floor \
+        .with_latest_from(s_selections, find_selection_on_floor) \
         .filter(bool)
 
 
@@ -103,7 +125,16 @@ def _create_calls(s_new_calls, s_serviced_calls):
         .scan(lambda calls, fn: fn(calls), seed=[])
 
 
-def _create_direction_changes(s_ready, s_serviced_calls, s_calls, current_floor):
+def _create_selections(s_new_selections, s_serviced_selections):
+    mod_fns = Observable.merge(
+        s_new_selections.map(lambda floor: set_adder(floor)),
+        s_serviced_selections.map(lambda floor: set_remover(floor)),
+    )
+    return mod_fns \
+        .scan(lambda selections, fn: fn(selections), seed=frozenset())
+
+
+def _create_call_direction_changes(s_ready, s_serviced_calls, s_calls, current_floor):
     s_starts = s_ready \
         .with_latest_from(s_calls, lambda _, calls: find_next_call(calls)) \
         .filter(bool) \
@@ -115,6 +146,21 @@ def _create_direction_changes(s_ready, s_serviced_calls, s_calls, current_floor)
     return Observable.merge(s_starts, s_stops)
 
 
+def _create_selection_direction_changes(s_ready, s_serviced_selections, s_selections, current_floor):
+    s_starts = s_ready \
+        .with_latest_from(s_selections, lambda _, selections: find_next_selection(selections)) \
+        .filter(bool) \
+        .with_latest_from(current_floor, lambda sel_floor, cur_floor: UP if cur_floor < sel_floor else DOWN)
+
+    s_stops = s_serviced_selections \
+        .map(lambda floor: None)
+
+    return Observable.merge(s_starts, s_stops)
+
+
+# Logic helpers ----------------------------------------------------------------
+
+
 def find_next_call(calls):
     return first(calls, None)
 
@@ -122,6 +168,17 @@ def find_next_call(calls):
 def find_call_on_floor(floor, calls):
     matching_calls = [call for call in calls if call.floor == floor]
     return first(matching_calls, None)
+
+
+def find_next_selection(selections):
+    return first(selections, None)
+
+
+def find_selection_on_floor(floor, selections):
+    return floor if floor in selections else None
+
+
+# Utilities --------------------------------------------------------------------
 
 
 def list_adder(item):
@@ -136,5 +193,17 @@ def list_remover(item):
     return remover
 
 
+def set_adder(item):
+    def adder(fset):
+        return fset | frozenset([item])
+    return adder
+
+
+def set_remover(item):
+    def remover(fset):
+        return fset - frozenset([item])
+    return remover
+
+
 def first(lst, default):
-    return lst[0] if lst else default
+    return next(iter(lst)) if lst else default
