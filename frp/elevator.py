@@ -38,7 +38,7 @@ class ElevatorLogic(object):
         floor: the floor that the elevator is being called to
         direction: the direction the caller wants to go, up or down
         """
-        self.inputs['called'].on_next((floor, direction))
+        self.inputs['called'].on_next(Call(floor, direction))
 
     def on_floor_selected(self, floor):
         """
@@ -73,11 +73,10 @@ def main(inputs):
     current_floor = BehaviorSubject(1)
     inputs['floor_changed'].subscribe(current_floor)
 
-    s_new_calls = _create_new_calls(inputs['called'])
     s_serviced_calls = _create_serviced_calls(current_floor, s_calls) \
         .publish().ref_count()
 
-    _create_calls(s_new_calls, s_serviced_calls).subscribe(s_calls)
+    _create_calls(inputs['called'], s_serviced_calls).subscribe(s_calls)
 
     s_direction_changes = _create_direction_changes(
         inputs['ready'],
@@ -87,11 +86,6 @@ def main(inputs):
     )
 
     return s_direction_changes.publish().ref_count()
-
-
-def _create_new_calls(s_called):
-    return s_called \
-        .map(lambda (floor, direction): Call(floor, direction))
 
 
 def _create_serviced_calls(current_floor, s_calls):
