@@ -1,4 +1,5 @@
 from collections import namedtuple
+from frp.utils import *
 from rx import Observable
 from rx.subjects import BehaviorSubject, Subject
 
@@ -11,23 +12,23 @@ FLOOR_COUNT = 6
 Call = namedtuple('Call', ('floor', 'direction'))
 
 
+class Inputs(object):
+
+    def __init__(self):
+        self.called_S = Subject()
+        self.floor_selected_S = Subject()
+        self.floor_changed_S = Subject()
+        self.tick_S = Subject()
+
+
 class ElevatorLogic(object):
 
     def __init__(self):
         self.callbacks = None
 
-        self.inputs = {
-            'called': Subject(),
-            'floor_selected': Subject(),
-            'floor_changed': Subject(),
-            'ready': Subject(),
-        }
-
-        current_direction = main(self.inputs)
-        current_direction.subscribe(lambda direction: self._go(direction))
-
-    def _go(self, direction):
-        self.callbacks.motor_direction = direction
+        self._inputs = Inputs()
+        motor_C = main(self._inputs, 1)
+        motor_C.subscribe(self._set_motor)
 
     def on_called(self, floor, direction):
         """
@@ -38,7 +39,7 @@ class ElevatorLogic(object):
         floor: the floor that the elevator is being called to
         direction: the direction the caller wants to go, up or down
         """
-        self.inputs['called'].on_next(Call(floor, direction))
+        self._inputs.called_S.on_next(Call(floor, direction))
 
     def on_floor_selected(self, floor):
         """
@@ -48,14 +49,14 @@ class ElevatorLogic(object):
 
         floor: the floor that was requested
         """
-        self.inputs['floor_selected'].on_next(floor)
+        self._inputs.floor_selected_S.on_next(floor)
 
     def on_floor_changed(self):
         """
         This lets you know that the elevator has moved one floor up or down.
         You should decide whether or not you want to stop the elevator.
         """
-        self.inputs['floor_changed'].on_next(self.callbacks.current_floor)
+        self._inputs.floor_changed_S.on_next(self.callbacks.current_floor)
 
     def on_ready(self):
         """
@@ -63,147 +64,72 @@ class ElevatorLogic(object):
         Maybe passengers have embarked and disembarked. The doors are closed,
         time to actually move, if necessary.
         """
-        self.inputs['ready'].on_next(None)
+        self._inputs.tick_S.on_next(None)
+
+    def _set_motor(self, direction):
+        """
+        Set the motor to move in the specified direction, or to stop if the
+        direction is None.
+        """
+        # This object's `callbacks` attribute isn't set until after it is
+        # created. But our Rx streams will have fired once before then. So
+        # check to make sure the attribute has been set before calling a
+        # property on it.
+        if self.callbacks is not None:
+            self.callbacks.motor_direction = direction
 
 
-def main(inputs):
-    # Stream loops for the outstanding calls and selections.
-    s_calls = Subject()
-    s_selections = Subject()
+def main(inputs, starting_floor):
+    floor_C = BehaviorSubject(starting_floor)
+    inputs.floor_changed_S.subscribe(floor_C)
 
-    current_floor = BehaviorSubject(1)
-    inputs['floor_changed'].subscribe(current_floor)
+    calls_C = BehaviorSubject(set())
+    calls_S = inputs.called_S \
+        .map(lambda call: call.floor) \
+        .scan(lambda called_floors, floor: called_floors | set([floor]), set())
+    calls_S.subscribe(calls_C)
 
-    s_serviced_calls = _create_serviced_calls(current_floor, s_calls) \
-        .publish().ref_count()
-    _create_calls(inputs['called'], s_serviced_calls) \
-        .subscribe(s_calls)
+    selections_C = BehaviorSubject(set())
+    inputs.floor_selected_S \
+        .scan(lambda selections, floor: selections | set([floor]), set()) \
+        .subscribe(selections_C)
 
-    s_serviced_selections = _create_serviced_selections(current_floor, s_selections) \
-        .publish().ref_count()
-    _create_selections(inputs['floor_selected'], s_serviced_selections) \
-        .subscribe(s_selections)
+    resume_S = inputs.tick_S \
+        .with_latest_from(selections_C, lambda _, selections: first(selections)) \
+        .filter(cmp(not_, is_none))
 
-    s_call_direction_changes = _create_call_direction_changes(
-        inputs['ready'],
-        s_serviced_calls, s_calls,
-        current_floor
-    )
-    s_selection_direction_changes = _create_selection_direction_changes(
-        inputs['ready'],
-        s_serviced_selections, s_selections,
-        current_floor
-    )
+    # TODO (TS 2016-05-16) Don't fire if motor is already moving.
+    motor_started_S = inputs.called_S \
+        .map(lambda call: call.floor) \
+        .merge(inputs.floor_selected_S, resume_S) \
+        .with_latest_from(floor_C, determine_direction)
 
-    return Observable.merge(
-        s_call_direction_changes,
-        s_selection_direction_changes,
-    )
+    stop_for_call_S = inputs.floor_changed_S \
+        .with_latest_from(calls_C, arrived_on_called_floor) \
+        .filter(identity) \
+        .map(always(None))
 
+    stop_for_selection_S = inputs.floor_changed_S \
+        .with_latest_from(selections_C, arrived_on_selected_floor) \
+        .filter(identity) \
+        .map(always(None))
 
-# Stream creation --------------------------------------------------------------
+    motor_stopped_S = Observable.merge(stop_for_call_S, stop_for_selection_S)
 
+    motor_C = BehaviorSubject(None)
+    motor_change_S = Observable.merge(motor_started_S, motor_stopped_S)
+    motor_change_S.subscribe(motor_C)
 
-def _create_serviced_calls(current_floor, s_calls):
-    return current_floor \
-        .with_latest_from(s_calls, find_call_on_floor) \
-        .filter(bool)
-
-
-def _create_serviced_selections(current_floor, s_selections):
-    return current_floor \
-        .with_latest_from(s_selections, find_selection_on_floor) \
-        .filter(bool)
+    return motor_C
 
 
-def _create_calls(s_new_calls, s_serviced_calls):
-    call_mod_fns = Observable.merge(
-        s_new_calls.map(lambda call: list_adder(call)),
-        s_serviced_calls.map(lambda call: list_remover(call))
-    )
-    return call_mod_fns \
-        .scan(lambda calls, fn: fn(calls), seed=[])
+def arrived_on_called_floor(current_floor, called_floors):
+    return current_floor in called_floors
 
 
-def _create_selections(s_new_selections, s_serviced_selections):
-    mod_fns = Observable.merge(
-        s_new_selections.map(lambda floor: set_adder(floor)),
-        s_serviced_selections.map(lambda floor: set_remover(floor)),
-    )
-    return mod_fns \
-        .scan(lambda selections, fn: fn(selections), seed=frozenset())
+def arrived_on_selected_floor(current_floor, selected_floors):
+    return current_floor in selected_floors
 
 
-def _create_call_direction_changes(s_ready, s_serviced_calls, s_calls, current_floor):
-    s_starts = s_ready \
-        .with_latest_from(s_calls, lambda _, calls: find_next_call(calls)) \
-        .filter(bool) \
-        .with_latest_from(current_floor, lambda call, floor: UP if floor < call.floor else DOWN)
-
-    s_stops = s_serviced_calls \
-        .map(lambda call: None)
-
-    return Observable.merge(s_starts, s_stops)
-
-
-def _create_selection_direction_changes(s_ready, s_serviced_selections, s_selections, current_floor):
-    s_starts = s_ready \
-        .with_latest_from(s_selections, lambda _, selections: find_next_selection(selections)) \
-        .filter(bool) \
-        .with_latest_from(current_floor, lambda sel_floor, cur_floor: UP if cur_floor < sel_floor else DOWN)
-
-    s_stops = s_serviced_selections \
-        .map(lambda floor: None)
-
-    return Observable.merge(s_starts, s_stops)
-
-
-# Logic helpers ----------------------------------------------------------------
-
-
-def find_next_call(calls):
-    return first(calls, None)
-
-
-def find_call_on_floor(floor, calls):
-    matching_calls = [call for call in calls if call.floor == floor]
-    return first(matching_calls, None)
-
-
-def find_next_selection(selections):
-    return first(selections, None)
-
-
-def find_selection_on_floor(floor, selections):
-    return floor if floor in selections else None
-
-
-# Utilities --------------------------------------------------------------------
-
-
-def list_adder(item):
-    def adder(lst):
-        return lst + [item]
-    return adder
-
-
-def list_remover(item):
-    def remover(lst):
-        return [each for each in lst if each != item]
-    return remover
-
-
-def set_adder(item):
-    def adder(fset):
-        return fset | frozenset([item])
-    return adder
-
-
-def set_remover(item):
-    def remover(fset):
-        return fset - frozenset([item])
-    return remover
-
-
-def first(lst, default):
-    return next(iter(lst)) if lst else default
+def determine_direction(requested_floor, current_floor):
+    return UP if requested_floor > current_floor else DOWN
