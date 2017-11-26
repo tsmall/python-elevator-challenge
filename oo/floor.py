@@ -15,7 +15,7 @@ class Floor(object):
         if self._number == floor_number:
             action()
 
-    def send_direction_to(self, other_floor, action):
+    def send_direction_to_floor(self, other_floor, action):
         other_floor._if_above(self._number, lambda: action(Direction.UP))
         other_floor._if_below(self._number, lambda: action(Direction.DOWN))
 

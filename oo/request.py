@@ -17,7 +17,7 @@ class CallRequest(object):
         elevator.begin_servicing_request(self)
 
     def send_movement_direction_to(self, elevator, current_floor):
-        current_floor.send_direction_to(
+        current_floor.send_direction_to_floor(
             self._floor,
             lambda direction: self._send_direction(elevator, direction)
         )
