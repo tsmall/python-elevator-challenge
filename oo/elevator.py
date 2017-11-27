@@ -1,7 +1,6 @@
 from direction import Direction
 from floor import Floor
-from request import CallRequest
-from requestqueue import CallRequestQueue
+from requests import CallRequest, RequestQueue, SelectionRequest
 
 class ElevatorLogic(object):
     """
@@ -10,7 +9,7 @@ class ElevatorLogic(object):
 
     def __init__(self):
         self.callbacks = None
-        self._call_queue = CallRequestQueue(self)
+        self._request_queue = RequestQueue(self)
         self._current_request = None
 
     @property
@@ -28,7 +27,7 @@ class ElevatorLogic(object):
         direction: the direction the caller wants to go, up or down
         """
         request = CallRequest(Floor(floor), Direction(direction))
-        self._call_queue.add(request)
+        self._request_queue.add_call_request(request)
 
     def on_floor_selected(self, floor):
         """
@@ -38,6 +37,8 @@ class ElevatorLogic(object):
 
         floor: the floor that was requested
         """
+        request = SelectionRequest(Floor(floor))
+        self._request_queue.add_selection_request(request)
 
     def on_floor_changed(self):
         """
@@ -52,12 +53,13 @@ class ElevatorLogic(object):
         embarked and disembarked. The doors are closed, time to actually move,
         if necessary.
         """
-        self._call_queue.service_next_request()
+        self._request_queue.service_next_request()
 
     def begin_servicing_request(self, request):
-        self._current_request = request
-        request.when_serviced(self._request_serviced)
-        request.send_movement_direction_to(self, self._current_floor)
+        if not self._current_request:
+            self._current_request = request
+            request.when_serviced(self._request_serviced)
+            request.send_movement_direction_to(self, self._current_floor)
 
     def _request_serviced(self, request):
         if request == self._current_request:
