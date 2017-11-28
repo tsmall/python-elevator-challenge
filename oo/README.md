@@ -64,8 +64,8 @@ in her [POODR][metz] book:
 > It allows objects to collaborate
 > without binding themselves to context
 > and is necessary in any application that expects to grow and change.
->
-> "When messages are trusting
+> [...]
+> When messages are trusting
 > and ask for what the sender wants
 > instead of telling the receiver how to behave,
 > objects naturally evolve public interfaces that are flexible and reusable
